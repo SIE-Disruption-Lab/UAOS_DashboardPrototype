@@ -1,4 +1,6 @@
+import os
 import shutil
+import stat
 import json
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -62,6 +64,12 @@ def _copy_template(project_dir: Path):
     gw = project_dir / "gradlew"
     if gw.exists():
         gw.chmod(0o755)
+    # Seed build/oml/ from the template (always sync so it's never stale/partial).
+    template_oml = _TEMPLATE_DIR / "build" / "oml"
+    dest_oml = project_dir / "build" / "oml"
+    if template_oml.is_dir():
+        dest_oml.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(str(template_oml), str(dest_oml), dirs_exist_ok=True)
 
 
 # ── List / Create ─────────────────────────────────────────────────────────────
@@ -180,16 +188,36 @@ def reupload_files(
             raise HTTPException(400, f"Only .oml files accepted (got {f.filename})")
         oml_files.append((f.filename, f.file.read()))
 
-    # Wipe old OML src directory and rebuild
+    def _force_rmtree(path):
+        """rmtree that clears read-only flags on Windows before retrying."""
+        def onerror(func, p, _):
+            try:
+                os.chmod(p, stat.S_IWRITE)
+                func(p)
+            except Exception:
+                pass
+        shutil.rmtree(path, onerror=onerror)
+
+    # Wipe old OML src directory
     project_dir = Path(p.project_dir)
     oml_src = project_dir / "src" / "oml"
     if oml_src.exists():
-        shutil.rmtree(oml_src)
+        _force_rmtree(oml_src)
 
-    # Also wipe build/ so Gradle re-runs everything
+    # Wipe only Gradle output subdirs (owl, results, reports) — leave build/oml/ alone.
     build_dir = project_dir / "build"
-    if build_dir.exists():
-        shutil.rmtree(build_dir)
+    for sub in ["owl", "results", "reports"]:
+        target = build_dir / sub
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+
+    # Sync build/oml/ from the template (adds any new vocabs like UAOS_Risk,
+    # creates the directory if it doesn't exist yet).
+    template_oml = _TEMPLATE_DIR / "build" / "oml"
+    dest_oml = build_dir / "oml"
+    if template_oml.is_dir():
+        dest_oml.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(str(template_oml), str(dest_oml), dirs_exist_ok=True)
 
     meta = setup_project_instance(
         project_dir=str(project_dir),

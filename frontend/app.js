@@ -21,6 +21,8 @@ const TABS = [
   { id: 'bayesian_network',         label: 'Bayesian Network',            description: 'Interactive Bayesian network — click observable nodes to toggle Pass / Fail and propagate beliefs across the network.' },
   // MOE Calculations
   { id: 'moe_calculations',         label: 'MOE Calculations',            description: 'MOE values calculated as the product of input parameter measurements, with historical timeline.' },
+  // Risk Matrices
+  { id: 'risk_matrix',              label: 'Risk Matrices',               description: 'DoD 5×5 risk matrices — system performance risks (DT) and operational risks (OT). Likelihood from Bayesian network posteriors.' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -458,6 +460,12 @@ const Dashboard = {
     // MOE Calculations has its own renderer
     if (tab.id === 'moe_calculations') {
       this._renderMoeCalculations(container, data);
+      return;
+    }
+
+    // Risk Matrices has its own renderer
+    if (tab.id === 'risk_matrix') {
+      this._renderRiskMatrix(container, data);
       return;
     }
 
@@ -1141,6 +1149,355 @@ const Dashboard = {
   },
 
   // ── End MOE Calculations ───────────────────────────────────────────────────
+
+  // ── Risk Matrices tab ─────────────────────────────────────────────────────
+
+  _renderRiskMatrix(container, data) {
+    if (!data.bindings || data.bindings.length === 0) {
+      container.innerHTML = '<div class="tab-empty"><i class="bi bi-inbox"></i> No risk data found in this dataset.</div>';
+      return;
+    }
+
+    // ── Build BN belief map from BN tab results (mirrors MOE tab pattern) ──
+    const bnBeliefs = {};
+    const bnData = (this._allResults || {}).bayesian_network;
+    if (bnData?.bindings?.length) {
+      const bnNodes = [], bnEdges = [];
+      for (const row of bnData.bindings) {
+        const type = row.rowType?.value;
+        if (type === 'node') {
+          bnNodes.push({
+            id:      row.id?.value || '',
+            visible: row.visible?.value === 'true',
+            prior:   parseFloat(row.trueVal?.value  ?? '0.5'),
+            trueVal: parseFloat(row.trueVal?.value  ?? '0.5'),
+          });
+        } else if (type === 'edge') {
+          bnEdges.push({
+            parent: row.parent?.value || '',
+            child:  row.child?.value  || '',
+            weight: parseFloat(row.weight?.value ?? '1.0'),
+          });
+        }
+      }
+      if (bnNodes.length) {
+        const initStates = {};
+        for (const n of bnNodes) {
+          if (!n.visible) continue;
+          initStates[n.id] = n.trueVal >= 1.0 ? 'pass' : n.trueVal <= 0.0 ? 'fail' : 'unknown';
+        }
+        const computed = this._computeBNBeliefs(bnNodes, bnEdges, initStates);
+        for (const [id, b] of Object.entries(computed)) bnBeliefs[id] = b;
+      }
+    }
+
+    // ── Group SPARQL rows by riskIri ───────────────────────────────────────
+    // Each risk may appear multiple times (one row per linked test).
+    const riskMap = {};   // iriStr → riskObj
+    for (const row of data.bindings) {
+      const iri  = row.riskIri?.value  || '';
+      const type = row.riskType?.value || '';
+      if (!iri || !type) continue;
+
+      if (!riskMap[iri]) {
+        const bnQtyIri  = row.bnQtyIri?.value || '';
+        // Lookup BN posterior if available, else fall back to stored prior
+        const storedPrior = parseFloat(row.bnTrueStateValue?.value ?? 'NaN');
+        const bnBelief    = bnQtyIri && (bnQtyIri in bnBeliefs) ? bnBeliefs[bnQtyIri] : null;
+        const adequacyP   = bnBelief !== null ? bnBelief : (isNaN(storedPrior) ? 0.5 : storedPrior);
+        const likelihood  = 1 - adequacyP;   // P(risk materialises) = 1 - P(adequate performance)
+
+        riskMap[iri] = {
+          iri,
+          type,
+          name:          row.riskName?.value        || iri.split('#').pop(),
+          description:   row.riskDescription?.value || '',
+          severityScore: parseInt(row.severityScore?.value ?? '1', 10),
+          severityLabel: row.severityLabel?.value   || '',
+          subjectName:   row.subjectName?.value     || '',
+          likelihood,
+          bnQtyIri,
+          tests: [],
+        };
+      }
+
+      if (row.testID?.value) {
+        const existing = riskMap[iri].tests.find(t => t.id === row.testID.value);
+        if (!existing) {
+          riskMap[iri].tests.push({
+            id:     row.testID?.value   || '',
+            name:   row.testName?.value || '',
+            status: row.testStatus?.value || '',
+          });
+        }
+      }
+    }
+
+    const allRisks = Object.values(riskMap);
+    const dtRisks  = allRisks.filter(r => r.type === 'DT');
+    const otRisks  = allRisks.filter(r => r.type === 'OT');
+
+    // ── Parse influence links from supplementary risk_influence query ──────
+    const influenceLinks = [];
+    const infData = (this._allResults || {}).risk_influence;
+    if (infData?.bindings?.length) {
+      for (const row of infData.bindings) {
+        const s = row.sysRiskIri?.value;
+        const o = row.opRiskIri?.value;
+        if (s && o && !influenceLinks.find(l => l.sysRiskIri === s && l.opRiskIri === o)) {
+          influenceLinks.push({ sysRiskIri: s, opRiskIri: o });
+        }
+      }
+    }
+
+    // ── Influence diagram section ──────────────────────────────────────────
+    const BOX_H = 52, BOX_GAP = 8, ROW_H = BOX_H + BOX_GAP;
+    const containerH = Math.max(dtRisks.length, 1) * ROW_H - BOX_GAP;
+
+    const dtBoxHtml = dtRisks.map((r, i) => {
+      const col = this._riskCellColor(r.severityScore, this._likelihoodBand(r.likelihood));
+      const highlight = influenceLinks.some(l => l.sysRiskIri === r.iri)
+        ? 'border-right:3px solid rgba(255,255,255,0.7);' : '';
+      return `<div id="risk-inf-dt-${i}" style="height:${BOX_H}px;margin-bottom:${BOX_GAP}px;background:${col};color:#fff;border-radius:4px;padding:5px 9px;display:flex;flex-direction:column;justify-content:center;${highlight}">
+        <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.name}</div>
+        <div style="font-size:10px;opacity:0.85;">${r.severityLabel} · ${(r.likelihood*100).toFixed(0)}% likely</div>
+      </div>`;
+    }).join('');
+
+    const otBoxHtml = otRisks.map((r, j) => {
+      const col = this._riskCellColor(r.severityScore, this._likelihoodBand(r.likelihood));
+      const spacing = otRisks.length > 1 ? containerH / otRisks.length : containerH;
+      const top = otRisks.length > 1 ? j * spacing + (spacing - BOX_H) / 2 : (containerH - BOX_H) / 2;
+      const highlight = influenceLinks.some(l => l.opRiskIri === r.iri)
+        ? 'border-left:3px solid rgba(255,255,255,0.7);' : '';
+      return `<div id="risk-inf-ot-${j}" style="position:absolute;top:${top}px;left:0;right:0;height:${BOX_H}px;background:${col};color:#fff;border-radius:4px;padding:5px 9px;display:flex;flex-direction:column;justify-content:center;${highlight}">
+        <div style="font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${r.name}</div>
+        <div style="font-size:10px;opacity:0.85;">${r.severityLabel} · ${(r.likelihood*100).toFixed(0)}% likely</div>
+      </div>`;
+    }).join('');
+
+    const influenceSectionHtml = `
+      <div class="mt-4 pt-3" style="border-top:1px solid #dee2e6;">
+        <h6 class="fw-semibold mb-1">Risk Influence Pathways</h6>
+        <p class="text-muted small mb-3">System risks (DT) propagating to operational impact — derived from measurand dependencies</p>
+        <div style="display:flex;align-items:flex-start;gap:0;">
+          <div style="flex:0 0 260px;">
+            <div class="text-muted small fw-semibold mb-2" style="text-align:center;">System Risks (DT)</div>
+            ${dtBoxHtml}
+          </div>
+          <div style="flex:1;min-width:60px;max-width:120px;position:relative;align-self:stretch;">
+            <svg id="risk-inf-svg" width="100%" height="100%" style="position:absolute;inset:0;overflow:visible;"></svg>
+          </div>
+          <div style="flex:0 0 260px;">
+            <div class="text-muted small fw-semibold mb-2" style="text-align:center;">Operational Risks (OT)</div>
+            <div style="position:relative;height:${containerH}px;">${otBoxHtml}</div>
+          </div>
+        </div>
+        ${influenceLinks.length === 0 ? '<p class="text-muted small mt-2"><em>No measurand-derived influence links found. Run Re-query if Fuseki is running.</em></p>' : ''}
+      </div>`;
+
+    container.innerHTML = `
+      <div class="row g-4">
+        <div class="col-lg-6">
+          <h6 class="fw-semibold mb-1">System Performance Risk Matrix</h6>
+          <p class="text-muted small mb-2">Risks informed by Developmental Testing (DT)</p>
+          ${this._buildRiskMatrixGrid('dt', dtRisks)}
+          ${this._buildRiskTable(dtRisks)}
+        </div>
+        <div class="col-lg-6">
+          <h6 class="fw-semibold mb-1">Operational Risk Matrix</h6>
+          <p class="text-muted small mb-2">Risks informed by Operational Testing (OT)</p>
+          ${this._buildRiskMatrixGrid('ot', otRisks)}
+          ${this._buildRiskTable(otRisks)}
+        </div>
+      </div>
+      <div class="mt-3 d-flex gap-4 flex-wrap align-items-center small text-muted">
+        <span class="fw-semibold">Consequence →</span>
+        ${['Low','Medium','High','Extreme'].map((l,i) => {
+          const c = ['#16a34a','#ca8a04','#dc2626','#991b1b'][i];
+          return `<span><span style="display:inline-block;width:12px;height:12px;background:${c};border-radius:2px;vertical-align:middle;margin-right:3px"></span>${l}</span>`;
+        }).join('')}
+        <span class="ms-2">Likelihood bands: 1 Rare &lt;10% · 2 Unlikely 10–30% · 3 Possible 30–50% · 4 Likely 50–70% · 5 Near Certain &gt;70%</span>
+      </div>
+      ${influenceSectionHtml}`;
+
+    if (influenceLinks.length) {
+      requestAnimationFrame(() => this._drawInfluenceLines(container, influenceLinks, dtRisks, otRisks, riskMap));
+      // If the tab is hidden (display:none) the RAF fires with zero dimensions — also
+      // draw on next show so lines appear whenever the user switches to this tab.
+      const tabBtn = document.querySelector('[data-bs-target="#tab-pane-risk_matrix"]');
+      if (tabBtn) {
+        const onShown = () => {
+          this._drawInfluenceLines(container, influenceLinks, dtRisks, otRisks, riskMap);
+          tabBtn.removeEventListener('shown.bs.tab', onShown);
+        };
+        tabBtn.addEventListener('shown.bs.tab', onShown);
+      }
+    }
+  },
+
+  // DoD 5×5 consequence × likelihood colour table
+  // rows = consequence 1..5 (bottom→top), cols = likelihood 1..5
+  _riskCellColor(cons, like) {
+    // Standard DoD risk colour matrix
+    const table = [
+    //  L1       L2       L3       L4       L5
+      ['#16a34a','#16a34a','#16a34a','#16a34a','#16a34a'],  // C1 Negligible
+      ['#16a34a','#16a34a','#16a34a','#ca8a04','#ca8a04'],  // C2 Marginal
+      ['#16a34a','#16a34a','#ca8a04','#dc2626','#dc2626'],  // C3 Moderate
+      ['#16a34a','#ca8a04','#dc2626','#dc2626','#991b1b'],  // C4 Critical
+      ['#ca8a04','#dc2626','#dc2626','#991b1b','#991b1b'],  // C5 Catastrophic
+    ];
+    const c = Math.max(0, Math.min(4, cons - 1));
+    const l = Math.max(0, Math.min(4, like - 1));
+    return table[c][l];
+  },
+
+  _likelihoodBand(p) {
+    if (p < 0.10) return 1;
+    if (p < 0.30) return 2;
+    if (p < 0.50) return 3;
+    if (p < 0.70) return 4;
+    return 5;
+  },
+
+  _likelihoodLabel(band) {
+    return ['','Rare','Unlikely','Possible','Likely','Near Certain'][band] || '';
+  },
+
+  _buildRiskMatrixGrid(prefix, risks) {
+    const SEVERITY_LABELS = ['','Negligible','Marginal','Moderate','Critical','Catastrophic'];
+    const LIKELIHOOD_LABELS = ['','Rare\n<10%','Unlikely\n10–30%','Possible\n30–50%','Likely\n50–70%','Near Certain\n>70%'];
+
+    // Place risks into grid cells: [cons][like] → [riskNames]
+    const cells = {};
+    for (const r of risks) {
+      const like = this._likelihoodBand(r.likelihood);
+      const key  = `${r.severityScore}_${like}`;
+      if (!cells[key]) cells[key] = [];
+      cells[key].push(r);
+    }
+
+    const axisStyle = 'font-size:10px;font-weight:600;color:#555;text-align:center;line-height:1.2;padding:2px;';
+    const cellSize  = 'width:72px;height:60px;';
+
+    // Build table: consequence rows 5→1 (top=catastrophic), likelihood cols 1→5
+    let rows = '';
+    for (let c = 5; c >= 1; c--) {
+      let tds = `<td style="writing-mode:vertical-rl;transform:rotate(180deg);${axisStyle}width:20px;">${SEVERITY_LABELS[c]}</td>`;
+      for (let l = 1; l <= 5; l++) {
+        const color  = this._riskCellColor(c, l);
+        const key    = `${c}_${l}`;
+        const cell   = cells[key] || [];
+        const badges = cell.map(r => {
+          const testTip = r.tests.map(t => `${t.id} [${t.status}]`).join(', ');
+          const abbrev  = r.name.length > 18 ? r.name.slice(0, 16) + '…' : r.name;
+          return `<span title="${r.name}&#10;${r.description ? r.description.slice(0,100)+'…' : ''}&#10;Tests: ${testTip || 'none'}"
+                       style="display:block;background:rgba(0,0,0,0.18);color:#fff;border-radius:3px;
+                              font-size:9px;padding:1px 3px;margin:1px 0;white-space:nowrap;
+                              overflow:hidden;text-overflow:ellipsis;cursor:default;">${abbrev}</span>`;
+        }).join('');
+        tds += `<td style="background:${color};${cellSize}vertical-align:top;padding:2px;">${badges}</td>`;
+      }
+      rows += `<tr>${tds}</tr>`;
+    }
+
+    // Likelihood axis row
+    let axisRow = '<td></td>';
+    for (let l = 1; l <= 5; l++) {
+      const lbl = LIKELIHOOD_LABELS[l].replace('\n','<br>');
+      axisRow += `<td style="${axisStyle}padding-top:4px;">${lbl}</td>`;
+    }
+
+    return `
+      <div style="overflow-x:auto;margin-bottom:10px;">
+        <table style="border-collapse:collapse;font-size:11px;">
+          <tbody>
+            ${rows}
+            <tr>${axisRow}</tr>
+          </tbody>
+        </table>
+        <div style="font-size:10px;color:#777;margin-top:2px;">← Likelihood</div>
+      </div>`;
+  },
+
+  _drawInfluenceLines(container, links, dtRisks, otRisks, riskMap) {
+    const svg = container.querySelector('#risk-inf-svg');
+    if (!svg) return;
+    const svgRect = svg.getBoundingClientRect();
+    if (!svgRect.width) return;
+
+    const defs = [];
+    const paths = [];
+
+    for (const link of links) {
+      const dtIdx = dtRisks.findIndex(r => r.iri === link.sysRiskIri);
+      const otIdx = otRisks.findIndex(r => r.iri === link.opRiskIri);
+      if (dtIdx < 0 || otIdx < 0) continue;
+
+      const dtEl = container.querySelector(`#risk-inf-dt-${dtIdx}`);
+      const otEl = container.querySelector(`#risk-inf-ot-${otIdx}`);
+      if (!dtEl || !otEl) continue;
+
+      const dtRect = dtEl.getBoundingClientRect();
+      const otRect = otEl.getBoundingClientRect();
+
+      const x1  = dtRect.right  - svgRect.left;
+      const y1  = dtRect.top    + dtRect.height / 2 - svgRect.top;
+      const x2  = otRect.left   - svgRect.left;
+      const y2  = otRect.top    + otRect.height / 2 - svgRect.top;
+      const cp  = Math.abs(x2 - x1) * 0.45;
+
+      const risk  = riskMap[link.sysRiskIri];
+      const color = this._riskCellColor(
+        risk?.severityScore ?? 3,
+        this._likelihoodBand(risk?.likelihood ?? 0.5)
+      );
+      const mid = `${dtIdx}-${otIdx}`;
+      defs.push(`<marker id="arr-${mid}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <path d="M0,0 L8,3 L0,6 Z" fill="${color}" opacity="0.9"/>
+      </marker>`);
+      paths.push(`<path d="M${x1},${y1} C${x1+cp},${y1} ${x2-cp},${y2} ${x2},${y2}"
+        fill="none" stroke="${color}" stroke-width="2.5" stroke-opacity="0.85"
+        marker-end="url(#arr-${mid})"/>`);
+    }
+
+    svg.innerHTML = `<defs>${defs.join('')}</defs>${paths.join('')}`;
+  },
+
+  _buildRiskTable(risks) {
+    if (risks.length === 0) return '<div class="text-muted small">No risks found.</div>';
+
+    const rows = [...risks]
+      .sort((a, b) => (b.severityScore - a.severityScore) || (b.likelihood - a.likelihood))
+      .map(r => {
+        const like   = this._likelihoodBand(r.likelihood);
+        const likeL  = this._likelihoodLabel(like);
+        const pct    = (r.likelihood * 100).toFixed(0) + '%';
+        const color  = this._riskCellColor(r.severityScore, like);
+        const dot    = `<span style="display:inline-block;width:10px;height:10px;background:${color};border-radius:50%;vertical-align:middle;margin-right:4px"></span>`;
+        const testBadges = r.tests.map(t => {
+          const bc = t.status === 'Completed' ? '#16a34a' : '#6c757d';
+          return `<span style="font-size:10px;background:${bc};color:#fff;border-radius:3px;padding:1px 4px;margin-right:2px;">${t.id}</span>`;
+        }).join('') || '<span class="text-muted small">—</span>';
+        return `<tr>
+          <td>${dot}${r.name}</td>
+          <td class="text-center">${r.severityLabel}</td>
+          <td class="text-center">${likeL} (${pct})</td>
+          <td>${testBadges}</td>
+        </tr>`;
+      }).join('');
+
+    return `
+      <div class="table-responsive">
+        <table class="table table-sm result-table" style="font-size:12px;">
+          <thead><tr><th>Risk</th><th class="text-center">Consequence</th><th class="text-center">Likelihood</th><th>Informing Tests</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  },
+
+  // ── End Risk Matrices ─────────────────────────────────────────────────────
 
   async showLog() {
     const data = await apiFetch(`/projects/${App.currentProjectId}/build/log`).catch(() => ({ log: 'Could not retrieve log.' }));

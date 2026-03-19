@@ -36,6 +36,10 @@ QUERY_TAB_MAP = {
     "bayesian_network":           "bayesian_network",
     # MOE Calculations
     "moe_calculation":            "moe_calculations",
+    # Risk Matrices
+    "risk_matrix":                "risk_matrix",
+    # Risk influence (supplementary data for risk_matrix tab — no UI tab button)
+    "risk_influence":             "risk_influence",
 }
 
 _LOCAL_MAVEN_DIR = Path(__file__).parent.parent.parent / "local_maven_repo"
@@ -63,12 +67,16 @@ def _run_pipeline_bg(project_id: int):
         # Determine rootIri from namespace
         root_iri = f"{project.namespace}/bundle"
 
-        success, log = run_full_pipeline(
-            project_dir=project.project_dir,
-            dataset_name=project.slug,
-            root_iri=root_iri,
-            local_maven_repo=str(_LOCAL_MAVEN_DIR),
-        )
+        try:
+            success, log = run_full_pipeline(
+                project_dir=project.project_dir,
+                dataset_name=project.slug,
+                root_iri=root_iri,
+                local_maven_repo=str(_LOCAL_MAVEN_DIR),
+            )
+        except Exception as exc:
+            success = False
+            log = f"Unhandled pipeline error: {exc}"
 
         if success:
             active_tabs = _detect_active_tabs(project.project_dir)

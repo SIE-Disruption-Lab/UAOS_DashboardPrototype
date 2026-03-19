@@ -4,9 +4,9 @@ All tasks run synchronously and stream output; the caller decides
 whether to run in a thread/background task.
 """
 import subprocess
+import shutil
 import sys
 import time
-import re
 from pathlib import Path
 
 
@@ -18,25 +18,31 @@ def _gradlew(project_dir: str) -> str:
 
 
 def _run(project_dir: str, task: str, extra_props: dict | None = None,
-         timeout: int = 600) -> tuple[int, str]:
+         timeout: int = 600, extra_args: list | None = None) -> tuple[int, str]:
     """
-    Run `./gradlew <task> [-P...]` in project_dir.
+    Run `./gradlew <task> [-P...] [extra_args]` in project_dir.
     Returns (returncode, combined stdout+stderr output).
     """
-    cmd = [_gradlew(project_dir), task, "--no-daemon"]
+    cmd = [_gradlew(project_dir), task]
     if extra_props:
         for k, v in extra_props.items():
             cmd.append(f"-P{k}={v}")
+    if extra_args:
+        cmd.extend(extra_args)
 
-    result = subprocess.run(
-        cmd,
-        cwd=project_dir,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    output = result.stdout + result.stderr
-    return result.returncode, output
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        output = result.stdout + result.stderr
+        return result.returncode, output
+    except subprocess.TimeoutExpired as e:
+        output = (e.stdout or b"").decode("utf-8", errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        return 124, f"TIMEOUT after {timeout}s\n{output}"
 
 
 def _build_props(project_dir: str, dataset_name: str, root_iri: str,
@@ -123,62 +129,65 @@ def run_stop_fuseki(project_dir: str) -> tuple[bool, str]:
 def run_full_pipeline(project_dir: str, dataset_name: str, root_iri: str,
                       local_maven_repo: str) -> tuple[bool, str]:
     """
-    Full pipeline: build → startFuseki → owlQuery.
+    Full pipeline: owlReason → startFuseki → owlQuery.
+    build/oml/ is pre-seeded from the template so downloadDependencies is always
+    UP-TO-DATE — no re-download, no pre-clean needed.
     Returns (success, combined_log).
     """
-    import shutil
     props = _build_props(project_dir, dataset_name, root_iri, local_maven_repo)
     full_log = []
 
-    # Kill any lingering Java/Gradle daemon processes that may hold file locks
-    if sys.platform == "win32":
-        subprocess.run(["taskkill", "/F", "/IM", "java.exe"],
-                       capture_output=True, timeout=10)
-        subprocess.run(["taskkill", "/F", "/IM", "javaw.exe"],
-                       capture_output=True, timeout=10)
-        time.sleep(1)
+    # Kill any running Fuseki so port 3030 is free for startFuseki.
+    # (Fuseki holds the TDB dataset lock, not build/oml — no need to touch build/oml.)
+    kill_log = _kill_port_3030()
+    full_log.append(f"=== PORT CLEANUP ===\n{kill_log}")
 
-    # Pre-clean build subdirs to avoid Windows file-lock errors on retry.
-    # Use cmd /c rmdir /s /q which is more forceful than shutil.rmtree on Windows.
+    # Pre-clean Gradle output dirs (owl, reports) from any previous run.
+    # build/oml is intentionally left alone — it's the pre-seeded UAOS stack.
+    # Use rename as fallback if rmdir fails due to Windows file locks.
     build_dir = Path(project_dir) / "build"
-    for sub in ["oml", "owl", "reports"]:
+    for sub in ["owl", "reports"]:
         target = build_dir / sub
+        if not target.exists():
+            continue
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["cmd", "/c", f"rmdir /s /q \"{target}\""],
+                               capture_output=True, timeout=15)
+            else:
+                shutil.rmtree(target)
+        except Exception:
+            pass
         if target.exists():
+            # Rename fallback — atomic on Windows even with locked children
             try:
-                if sys.platform == "win32":
-                    subprocess.run(
-                        ["cmd", "/c", f"rmdir /s /q \"{target}\""],
-                        capture_output=True, timeout=30
-                    )
-                else:
-                    shutil.rmtree(target)
-                if target.exists():
-                    full_log.append(f"=== PRE-CLEAN WARNING ===\nCould not fully delete {sub} (will retry)")
+                target.rename(build_dir / f"{sub}_old_{int(time.time())}")
             except Exception as e:
-                full_log.append(f"=== PRE-CLEAN WARNING ===\nCould not delete {sub}: {e}")
+                full_log.append(f"=== PRE-CLEAN WARNING ===\nCould not clear {sub}/: {e}")
 
-    # Step 1: Build (validate + reason)
-    code, log = _run(project_dir, "owlReason", props, timeout=300)
+    # Step 1: Validate + reason.
+    # build/oml/ is pre-seeded from the template so we explicitly exclude
+    # downloadDependencies from the task graph — it is never needed.
+    code, log = _run(project_dir, "owlReason", props, timeout=300,
+                     extra_args=["-x", "downloadDependencies"])
     full_log.append("=== BUILD ===\n" + log)
     if code != 0:
         return False, "\n".join(full_log)
 
-    # Step 2: Force-clear port 3030, then start Fuseki
-    kill_log = _kill_port_3030()
-    full_log.append(f"=== PORT CLEANUP ===\n{kill_log}")
-
+    # Step 2: Start Fuseki
     code, log = _run(project_dir, "startFuseki", props, timeout=60)
     full_log.append("=== START FUSEKI ===\n" + log)
     if code != 0:
         return False, "\n".join(full_log)
 
-    # Step 3: Wait for Fuseki to be ready before loading
+    # Step 3: Wait for Fuseki to be ready
     ready = _wait_for_fuseki(dataset_name, retries=15, delay=2.0)
     full_log.append(f"=== FUSEKI READY CHECK ===\n{'Ready' if ready else 'Timed out waiting'}")
     if not ready:
         return False, "\n".join(full_log)
 
     # Step 4: Load + Query
-    code, log = _run(project_dir, "owlQuery", props, timeout=300)
+    code, log = _run(project_dir, "owlQuery", props, timeout=300,
+                     extra_args=["-x", "downloadDependencies"])
     full_log.append("=== LOAD + QUERY ===\n" + log)
     return code == 0, "\n".join(full_log)

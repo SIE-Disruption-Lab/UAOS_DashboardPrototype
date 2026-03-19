@@ -1,0 +1,67 @@
+# ==============================================================================
+# Risk Matrix
+#
+# Returns all SystemRisk and OperationalRisk instances tagged with ?riskType
+# ("DT" or "OT"), severity, the BN latent quantity whose hasBayesianTrueStateValue
+# supplies the prior likelihood, and any tests linked via informsRisk.
+#
+# Multiple rows per risk when multiple tests are linked — the renderer groups
+# by ?riskIri. Likelihood is computed by the dashboard as 1 − bnTrueStateValue
+# (or from BN posterior beliefs when BN tab results are available, matching
+# the MOE Calculations tab pattern).
+#
+# Expected result: ≥5 DT rows + ≥2 OT rows (more if multiple tests per risk)
+# ==============================================================================
+
+PREFIX rdf:      <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs:     <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd:      <http://www.w3.org/2001/XMLSchema#>
+PREFIX tlo:      <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX info:     <http://uaontologies.com/UAOS_Core/UAOS_Information#>
+PREFIX bn:       <http://uaontologies.com/UAOS_Domain/UAOS_BayesianNetworks#>
+PREFIX risk:     <http://uaontologies.com/UAOS_Domain/UAOS_Risk#>
+PREFIX test:     <http://uaontologies.com/UAOS_Domain/UAOS_Test#>
+PREFIX meas:     <http://uaontologies.com/UAOS_Core/UAOS_Measurement#>
+
+SELECT ?riskIri ?riskType ?riskName ?riskDescription
+       ?severityScore ?severityLabel
+       ?subjectName
+       ?bnQtyIri ?bnTrueStateValue
+       ?testID ?testName ?testStatus
+WHERE {
+  {
+    ?riskIri a risk:SystemRisk .
+    BIND("DT" AS ?riskType)
+  }
+  UNION
+  {
+    ?riskIri a risk:OperationalRisk .
+    BIND("OT" AS ?riskType)
+  }
+
+  ?riskIri risk:hasSeverityScore ?severityScore ;
+           risk:hasSeverityLabel ?severityLabel .
+  OPTIONAL { ?riskIri tlo:hasName ?riskName }
+  OPTIONAL { ?riskIri tlo:hasNaturalLanguageDescription ?riskDescription }
+
+  # What the risk describes (subsystem for DT, mission for OT)
+  OPTIONAL {
+    ?riskIri info:describes ?subject .
+    OPTIONAL { ?subject tlo:hasName ?subjectName }
+  }
+
+  # BN latent quantity supplying the prior likelihood
+  OPTIONAL {
+    ?riskIri risk:hasLikelihoodQuantity ?bnQtyIri .
+    OPTIONAL { ?bnQtyIri bn:hasBayesianTrueStateValue ?bnTrueStateValue }
+  }
+
+  # Tests that inform this risk (may produce multiple rows per risk)
+  OPTIONAL {
+    ?testInst risk:informsRisk ?riskIri .
+    OPTIONAL { ?testInst tlo:hasID    ?testID }
+    OPTIONAL { ?testInst tlo:hasName  ?testName }
+    OPTIONAL { ?testInst test:hasTestStatus ?testStatus }
+  }
+}
+ORDER BY ?riskType DESC(?severityScore) ?riskName ?testID

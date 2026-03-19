@@ -3,7 +3,6 @@ OML service: parse uploaded .oml files, generate bundle.oml and catalog.xml
 for a project instance directory.
 """
 import re
-import os
 from pathlib import Path
 
 
@@ -15,7 +14,6 @@ _NS_RE = re.compile(
     r'(?:description\s+(?:bundle\s+)?|vocabulary\s+)<([^#>]+)#?>',
     re.MULTILINE
 )
-
 
 def extract_namespace(content: str) -> str | None:
     """Return the namespace URI (without trailing #) from an OML file."""
@@ -135,13 +133,14 @@ def setup_project_instance(
     # Decode and normalise line endings (OML parser rejects \r\n)
     decoded = [(fn, raw.decode('utf-8', errors='replace').replace('\r\n', '\n').replace('\r', '\n'))
                for fn, raw in oml_files]
+
     namespace_base, project_slug = infer_project_namespace(decoded)
 
-    # Determine OML output directory
+    # Determine OML output directory for description files
     oml_out = pd / 'src' / 'oml' / 'uaontologies.com' / project_slug
     oml_out.mkdir(parents=True, exist_ok=True)
 
-    # Write OML files
+    # Write user description OML files
     description_namespaces = []
     for filename, content in decoded:
         if 'bundle' in filename.lower():

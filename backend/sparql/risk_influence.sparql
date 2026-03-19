@@ -1,0 +1,49 @@
+# ==============================================================================
+# Risk Influence Pathways (3-hop derivation)
+#
+# Derives which SystemRisks influence which OperationalRisks by traversing
+# the measurand dependency chain:
+#
+#   SystemRisk --hasLikelihoodQuantity--> sysQty
+#                                            ^
+#                               calculatedUsing (reverse)
+#                                            |
+#   OperationalRisk --hasLikelihoodQuantity--> opQty
+#
+# No explicit risk-to-risk relation required — the link is inferred from
+# the fact that the operational quantity is computed from the system quantity.
+#
+# Example: risk_PositionAssessment → risk_MissionKillProb
+#   Berserker_PositionAssessment (sysQty) is listed in P_Kill's calculatedUsing,
+#   and P_Kill is risk_MissionKillProb's likelihood quantity.
+# ==============================================================================
+
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX tlo:   <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX risk:  <http://uaontologies.com/UAOS_Domain/UAOS_Risk#>
+PREFIX meas:  <http://uaontologies.com/UAOS_Core/UAOS_Measurement#>
+PREFIX bn:    <http://uaontologies.com/UAOS_Domain/UAOS_BayesianNetworks#>
+
+SELECT ?sysRiskIri ?sysRiskName ?sysSeverityScore ?sysSeverityLabel ?sysBnTrueStateValue
+       ?opRiskIri  ?opRiskName  ?opSeverityScore  ?opSeverityLabel  ?opBnTrueStateValue
+WHERE {
+  # Hop 1: system risk and its likelihood quantity
+  ?sysRiskIri a risk:SystemRisk ;
+              risk:hasLikelihoodQuantity ?sysQty ;
+              risk:hasSeverityScore  ?sysSeverityScore ;
+              risk:hasSeverityLabel  ?sysSeverityLabel .
+  OPTIONAL { ?sysRiskIri tlo:hasName ?sysRiskName }
+  OPTIONAL { ?sysQty bn:hasBayesianTrueStateValue ?sysBnTrueStateValue }
+
+  # Hop 3: operational risk and its likelihood quantity
+  ?opRiskIri a risk:OperationalRisk ;
+             risk:hasLikelihoodQuantity ?opQty ;
+             risk:hasSeverityScore  ?opSeverityScore ;
+             risk:hasSeverityLabel  ?opSeverityLabel .
+  OPTIONAL { ?opRiskIri tlo:hasName ?opRiskName }
+  OPTIONAL { ?opQty bn:hasBayesianTrueStateValue ?opBnTrueStateValue }
+
+  # Hop 2: the operational quantity is derived from the system quantity
+  ?opQty meas:calculatedUsing ?sysQty .
+}
+ORDER BY ?opRiskName DESC(?sysSeverityScore)

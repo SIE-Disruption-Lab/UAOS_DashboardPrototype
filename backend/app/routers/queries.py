@@ -108,6 +108,21 @@ TABS = [
         "description": "MOE values calculated as the product of input parameter measurements, with historical timeline.",
         "query_file":  "moe_calculation",
     },
+    # ── Risk Matrices ─────────────────────────────────────────────────────────
+    {
+        "id":          "risk_matrix",
+        "label":       "Risk Matrices",
+        "description": "DoD 5×5 risk matrices — system performance risks (informed by DT) and operational risks (informed by OT). Likelihood derived from Bayesian network posteriors; severity on DoD consequence scale.",
+        "query_file":  "risk_matrix",
+    },
+    # Supplementary data for the risk_matrix tab — no UI tab button (not in frontend TABS).
+    # Derives DT→OT influence via 3-hop measurand dependency chain.
+    {
+        "id":          "risk_influence",
+        "label":       "Risk Influence",
+        "description": "Supplementary: DT→OT risk influence derived from measurand calculatedUsing chain.",
+        "query_file":  "risk_influence",
+    },
 ]
 
 _TAB_BY_ID = {t["id"]: t for t in TABS}
