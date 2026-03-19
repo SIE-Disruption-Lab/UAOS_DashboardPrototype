@@ -1,0 +1,22 @@
+# Q4 — Mode-Function Availability Matrix
+# Produces the complete table of which functions are available in which modes,
+# and which system bears each function.
+# Equivalent to an ECSS-E-ST-70-11C Table 5.1, generated directly from the model.
+# Transitions are excluded; their availability is inferred by the TransitionAvailability rule.
+# Pivot on ?modeName to produce a classic mode-function availability matrix.
+
+PREFIX tlo:   <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX modes: <http://uaontologies.com/UAOS_Domain/UAOS_Modes#>
+PREFIX sta:   <http://uaontologies.com/UAOS_Domain/UAOS_States#>
+
+SELECT ?modeName ?fnName ?systemName
+WHERE {
+  ?fn a tlo:Function ;
+      tlo:hasName ?fnName ;
+      modes:availableIn ?mode ;
+      tlo:sdo ?sys .
+  FILTER NOT EXISTS { ?fn a sta:Transition }
+  ?mode tlo:hasName ?modeName .
+  ?sys  tlo:hasName ?systemName .
+}
+ORDER BY ?modeName ?fnName

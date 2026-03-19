@@ -1,0 +1,36 @@
+# ==============================================================================
+# Q3: MOP Trade-Space Comparison (Baseline vs Berserker)
+#
+# Returns one row per MOP with system label derived from namespace.
+# Expected: 4 rows — 2 systems × 2 metrics (time, detection probability)
+# ==============================================================================
+
+PREFIX mo:   <http://uaontologies.com/UAOS_Domain/UAOS_Measures#>
+PREFIX meas: <http://uaontologies.com/UAOS_Core/UAOS_Measurement#>
+PREFIX info: <http://uaontologies.com/UAOS_Core/UAOS_Information#>
+PREFIX req:  <http://uaontologies.com/UAOS_Domain/UAOS_Requirements#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?system ?mopLabel ?measuredValue ?unitLabel ?thresholdOperator ?thresholdValue ?moeLabel
+WHERE {
+  ?mop a                      mo:MOP ;
+       mo:hasMeasurementResult ?mv ;
+       mo:hasConstraint        ?con ;
+       mo:contributesToMOE     ?moe .
+
+  ?mv meas:hasValue ?measuredValue .
+  ?ce info:represents ?con .
+
+  OPTIONAL { ?mop  rdfs:label            ?mopLabel  }
+  OPTIONAL { ?mv   meas:hasUnit          ?unit }
+  OPTIONAL { ?unit rdfs:label            ?unitLabel }
+  OPTIONAL { ?moe  rdfs:label            ?moeLabel  }
+  OPTIONAL { ?ce   req:lessThanOrEqualTo ?thresholdLTE }
+  OPTIONAL { ?ce   req:lessThan          ?thresholdLT  }
+
+  BIND(COALESCE(?thresholdLTE, ?thresholdLT)  AS ?thresholdValue)
+  BIND(IF(BOUND(?thresholdLTE), "≤", "<")     AS ?thresholdOperator)
+  BIND(IF(CONTAINS(STR(?mop), "BerserkerMission"),
+       "Berserker (MQ-99)", "Baseline (AH-64A)") AS ?system)
+}
+ORDER BY ?unitLabel ?system

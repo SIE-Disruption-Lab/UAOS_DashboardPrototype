@@ -1,0 +1,18 @@
+# Q6 — State Machine Completeness: Modes with No Entry Transition
+# Finds Mode instances that have no sta:enteredBy assertion.
+# A mode with no entry transition is either the designated initial state (acceptable)
+# or a reachability error — the system can never enter that mode.
+# Expected result: mode-off has no enteredBy assertion; it should be entered by
+# tr-shutdown-engine when the driver turns off the ignition.
+
+PREFIX modes: <http://uaontologies.com/UAOS_Domain/UAOS_Modes#>
+PREFIX sta:   <http://uaontologies.com/UAOS_Domain/UAOS_States#>
+PREFIX tlo:   <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+
+SELECT ?modeName
+WHERE {
+  ?mode a modes:Mode ;
+        tlo:hasName ?modeName .
+  FILTER NOT EXISTS { ?mode sta:enteredBy ?tr }
+}
+ORDER BY ?modeName

@@ -1,0 +1,34 @@
+# ==============================================================================
+# MOE Calculations — product of input parameter measurements
+#
+# Returns one row per (MOE, parameter, measurement value, datetime).
+# The frontend reconstructs the MOE timeline by:
+#   1. Sorting measurements chronologically
+#   2. At each event date, using the most-recent value per parameter
+#   3. Computing the product (all values are percentages → divide by 100 each)
+# ==============================================================================
+
+PREFIX tlo:  <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX mo:   <http://uaontologies.com/UAOS_Domain/UAOS_Measures#>
+PREFIX info: <http://uaontologies.com/UAOS_Core/UAOS_Information#>
+PREFIX meas: <http://uaontologies.com/UAOS_Core/UAOS_Measurement#>
+PREFIX prov: <http://uaontologies.com/UAOS_Core/UAOS_Provenance#>
+
+SELECT ?moeName ?moeIri ?paramIri ?paramName ?paramValue ?measuredAt
+WHERE {
+    ?moeSpec a mo:MOE .
+    ?moeSpec info:prescribes ?moeIri .
+    ?moeIri  a meas:Quantity .
+    ?moeIri  meas:calculatedUsing ?paramIri .
+    ?paramIri a meas:Quantity .
+
+    ?paramMeas meas:measurementOf ?paramIri .
+    ?paramMeas meas:hasValue ?paramValue .
+
+    ?record tlo:hgd ?paramMeas .
+    ?record prov:generatedAt ?measuredAt .
+
+    OPTIONAL { ?moeIri   tlo:hasName ?moeName   }
+    OPTIONAL { ?paramIri tlo:hasName ?paramName  }
+}
+ORDER BY ?moeName ?measuredAt ?paramName

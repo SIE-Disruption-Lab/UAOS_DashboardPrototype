@@ -1,0 +1,78 @@
+body {
+  background: #f4f6f9;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ── Navbar ── */
+#navbar { position: sticky; top: 0; z-index: 1000; }
+
+/* ── Status badges ── */
+.badge-pending  { background: #6c757d; }
+.badge-building { background: #0d6efd; animation: pulse 1s infinite; }
+.badge-ready    { background: #198754; }
+.badge-failed   { background: #dc3545; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+/* ── Project cards ── */
+.project-card {
+  cursor: pointer;
+  transition: transform .15s, box-shadow .15s;
+}
+.project-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0,0,0,.12);
+}
+
+/* ── Tabs ── */
+.nav-tabs .nav-link { color: #495057; }
+.nav-tabs .nav-link.active { font-weight: 600; }
+.tab-recommended .nav-link { border-bottom: 3px solid #0d6efd !important; }
+.nav-tabs .nav-link.tab-inactive { color: #adb5bd; font-style: italic; }
+.nav-tabs .nav-link.tab-inactive:hover { color: #6c757d; }
+
+/* ── Result table ── */
+.result-table {
+  font-size: .82rem;
+}
+.result-table th {
+  background: #343a40;
+  color: #fff;
+  white-space: nowrap;
+}
+.result-table td {
+  vertical-align: middle;
+  word-break: break-word;
+  max-width: 320px;
+}
+
+/* ── Build log ── */
+.build-log {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: 'Consolas', monospace;
+  font-size: .78rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+/* ── Gap rows ── */
+tr.gap-row td { background: #fff3cd; color: #856404; }
+
+/* ── Chart container ── */
+.chart-container {
+  position: relative;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+/* ── Empty tab placeholder ── */
+.tab-empty {
+  color: #6c757d;
+  text-align: center;
+  padding: 3rem 0;
+}

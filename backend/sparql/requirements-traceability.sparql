@@ -1,0 +1,34 @@
+# Q5 — Requirements Traceability Matrix (Allocation + Verification)
+# For every requirement, shows the system it is allocated to (if any) and the
+# verification activity that verifies it (if any).
+# Rows with missing sysName or verName identify traceability gaps.
+# This query generates a requirements traceability matrix (RTM) on demand,
+# always consistent with the current model state.
+
+PREFIX req:  <http://uaontologies.com/UAOS_Domain/UAOS_Requirements#>
+PREFIX ver:  <http://uaontologies.com/UAOS_Domain/UAOS_Verification#>
+PREFIX tlo:  <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT DISTINCT ?id ?reqName ?sysName ?verName
+WHERE {
+  ?r a ?type ;
+     tlo:hasID ?id ;
+     tlo:hasName ?reqName .
+  ?type rdfs:subClassOf* req:Requirement .
+  OPTIONAL {
+    ?sys req:allocatesRequirement ?r ;
+         tlo:hasName ?sysName .
+    # Keep only the lowest-level allocating system:
+    # exclude ?sys if any of its parts also allocates the same requirement
+    FILTER NOT EXISTS {
+      ?sys tlo:hasContinuantPart+ ?sub .
+      ?sub req:allocatesRequirement ?r .
+    }
+  }
+  OPTIONAL {
+    ?act ver:verifies ?r ;
+         tlo:hasName ?verName .
+  }
+}
+ORDER BY ?id ?sysName

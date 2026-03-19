@@ -1,0 +1,24 @@
+# Q1 — Interface Type Mismatch
+# Finds ConnectsTo connections where the two ports are prescribed by different InterfaceTypes.
+# A valid connection must link two ports of the same InterfaceType.
+# Expected result: obd-port (InformationInterface) connected to service-obd-port (MatterInterface).
+#
+# Note: OML relation instances compile to OWL individuals using oml:hasSource / oml:hasTarget
+# (from http://opencaesar.io/oml#) rather than the relation entity's forward property.
+
+PREFIX oml:   <http://opencaesar.io/oml#>
+PREFIX iface: <http://uaontologies.com/UAOS_Domain/UAOS_Interfaces#>
+PREFIX info:  <http://uaontologies.com/UAOS_Core/UAOS_Information#>
+PREFIX tlo:   <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+
+SELECT ?p1Name ?p2Name ?type1Name ?type2Name
+WHERE {
+  ?conn a iface:ConnectsTo ;
+        oml:hasSource ?p1 ;
+        oml:hasTarget ?p2 .
+  ?p1 info:isPrescribedBy ?type1 ; tlo:hasName ?p1Name .
+  ?p2 info:isPrescribedBy ?type2 ; tlo:hasName ?p2Name .
+  ?type1 tlo:hasName ?type1Name .
+  ?type2 tlo:hasName ?type2Name .
+  FILTER (?type1 != ?type2)
+}

@@ -1,0 +1,36 @@
+# ==============================================================================
+# Q6: Test-to-Milestone Traceability with Assessment Findings
+#
+# Mission Engineering Question (MEG Q11 / Q21):
+#   Which DT events trace to which program milestones?
+#   What assessment findings are associated with each milestone?
+#   Which findings have low confidence scores — indicating risk?
+#
+# T&E program maturity insight: confidence scores below 0.85 on findings
+#   associated with upcoming milestones identify subsystems where the
+#   model-to-operational gap is not yet well-understood and additional
+#   DT events are recommended before milestone completion.
+#
+# Low-confidence finding: finding_CommsRisk (0.78) — Communications
+#   system shows structural degradation requiring cyber resilience testing.
+# ==============================================================================
+
+PREFIX tlo:        <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX assessment: <http://uaontologies.com/UAOS_Domain/UAOS_Assessment#>
+
+SELECT ?testID ?testName ?milestoneID ?milestoneName ?findingName ?confidenceScore
+WHERE {
+  ?test      assessment:tracesToMilestone ?milestone .
+  ?milestone tlo:hasID                   ?milestoneID ;
+             tlo:hasName                 ?milestoneName .
+
+  OPTIONAL { ?test tlo:hasID   ?testID   }
+  OPTIONAL { ?test tlo:hasName ?testName }
+
+  OPTIONAL {
+    ?milestone assessment:hasFinding   ?finding .
+    ?finding   tlo:hasName             ?findingName ;
+               assessment:confidenceScore ?confidenceScore .
+  }
+}
+ORDER BY ?milestoneID ?testID ?confidenceScore

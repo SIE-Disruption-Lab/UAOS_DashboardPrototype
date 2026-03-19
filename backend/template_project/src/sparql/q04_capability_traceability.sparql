@@ -1,0 +1,36 @@
+# ==============================================================================
+# Q4: Capability Requirement Satisfaction Traceability
+#
+# Mission Engineering Question (MEG Q1 / Q3):
+#   Which capabilities satisfy the SEAD capability requirement?
+#   Which physical systems bear those capabilities?
+#
+# Implements the MEG traceability chain:
+#   EnterpriseGoal → CapabilityRequirement → Capability → System (bearer)
+#
+# Key architectural comparison:
+#   Baseline  — cr_SEAD satisfied by capabilities distributed across
+#               three separate platforms (Apache attack, Pave Low nav,
+#               MH-53J EW detection).
+#   Berserker — cr_SEAD satisfied by two capabilities both borne by
+#               arch:system_MQ99 — a single-platform solution.
+# ==============================================================================
+
+PREFIX me:   <http://uaontologies.com/UAOS_Domain/UAOS_MissionEngineering#>
+PREFIX tlo:  <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?crLabel ?capabilityLabel ?bearerName
+WHERE {
+  ?cr         a                              me:CapabilityRequirement .
+  ?capability a                              me:Capability ;
+              me:satisfiesCapabilityRequirement ?cr ;
+              tlo:sdo                        ?bearer .
+
+  OPTIONAL { ?cr         rdfs:label  ?crLabel         }
+  OPTIONAL { ?capability rdfs:label  ?capabilityLabel }
+  OPTIONAL { ?bearer     tlo:hasName ?bHasName        }
+  OPTIONAL { ?bearer     rdfs:label  ?bRdfsLabel      }
+  BIND(COALESCE(?bHasName, ?bRdfsLabel) AS ?bearerName)
+}
+ORDER BY ?crLabel ?capabilityLabel

@@ -1,0 +1,103 @@
+/*
+ * UAOS Dashboard — Template Gradle Project
+ * All configurable values are passed as -P properties by the Python backend.
+ */
+
+ext.title       = project.findProperty('projectTitle')    ?: 'User Project'
+description     = 'UAOS description project managed by UAOS Dashboard'
+group           = 'com.uaontologies.user'
+version         = '1.0.0'
+
+apply plugin: 'base'
+apply plugin: 'oml'
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'io.opencaesar.owl:owl-fuseki-gradle:+'
+        classpath 'io.opencaesar.owl:owl-query-gradle:+'
+        classpath 'io.opencaesar.owl:owl-load-gradle:+'
+        classpath 'io.opencaesar.owl:owl-reason-gradle:+'
+        classpath 'io.opencaesar.oml:oml-merge-gradle:+'
+        classpath 'io.opencaesar.adapters:oml2owl-gradle:+'
+    }
+}
+
+ext {
+    // Passed by backend: -PdatasetName=MyProject
+    dataset  = project.findProperty('datasetName') ?: 'UserProject'
+    // Passed by backend: -ProotIri=http://uaontologies.com/MyProject/bundle
+    rootIri  = project.findProperty('rootIri')     ?: "http://uaontologies.com/UserProject/bundle"
+    // Passed by backend: -PlocalMavenRepo=/abs/path/to/local_maven_repo
+    localMavenRepoPath = project.findProperty('localMavenRepo') ?:
+        new File(projectDir, '../../local_maven_repo').canonicalPath
+}
+
+repositories {
+    maven { url localMavenRepoPath }
+    mavenCentral()
+}
+
+dependencies {
+    oml "io.opencaesar.ontologies:core-vocabularies:5.+"
+    oml "com.uaontologies:UAOS_TopLevel:1.0"
+    oml "com.uaontologies:UAOS_Core:1.0.0"
+    oml "com.uaontologies:UAOS_Domain:1.0.0"
+    oml "com.uaontologies:UAOS_Libraries:1.0.0"
+}
+
+task downloadDependencies(type: io.opencaesar.oml.merge.OmlMergeTask, group: "oml", dependsOn: configurations.oml) {
+    inputZipPaths      = configurations.oml.files
+    outputCatalogFolder = file('build/oml')
+}
+
+task omlToOwl(type: io.opencaesar.oml2owl.Oml2OwlTask, group: "oml", dependsOn: downloadDependencies) {
+    inputCatalogPath  = file('catalog.xml')
+    outputCatalogPath = file('build/owl/catalog.xml')
+}
+
+task owlReason(type: io.opencaesar.owl.reason.OwlReasonTask, group: "oml", dependsOn: omlToOwl) {
+    catalogPath       = file('build/owl/catalog.xml')
+    inputOntologyIri  = "$rootIri".toString()
+    specs = [
+        "$rootIri/classes = ALL_SUBCLASS".toString(),
+        "$rootIri/properties = INVERSE_PROPERTY | ALL_SUBPROPERTY".toString(),
+        "$rootIri/individuals = ALL_INSTANCE | DATA_PROPERTY_VALUE | OBJECT_PROPERTY_VALUE | SAME_AS".toString()
+    ]
+    reportPath        = file('build/reports/reasoning.xml')
+}
+
+task startFuseki(type: io.opencaesar.owl.fuseki.StartFusekiTask, group: "oml") {
+    configurationPath = file('.fuseki.ttl')
+    outputFolderPath  = file('.fuseki')
+}
+
+task stopFuseki(type: io.opencaesar.owl.fuseki.StopFusekiTask, group: "oml") {
+    outputFolderPath  = file('.fuseki')
+}
+
+task owlLoad(type: io.opencaesar.owl.load.OwlLoadTask, group: "oml", dependsOn: owlReason) {
+    inputs.files(startFuseki.outputFolderPath)
+    catalogPath  = file('build/owl/catalog.xml')
+    endpointURL  = "http://localhost:3030/$dataset".toString()
+    fileExtensions = ['owl', 'ttl']
+    iris = [
+        "$rootIri/classes".toString(),
+        "$rootIri/properties".toString(),
+        "$rootIri/individuals".toString()
+    ]
+}
+
+task owlQuery(type: io.opencaesar.owl.query.OwlQueryTask, group: "oml", dependsOn: owlLoad) {
+    inputs.files(owlLoad.inputs.files)
+    endpointURL = "http://localhost:3030/$dataset".toString()
+    queryPath   = file('src/sparql')
+    resultPath  = file('build/results')
+    format      = 'json'
+}
+
+tasks.named('check') {
+    dependsOn owlReason
+}

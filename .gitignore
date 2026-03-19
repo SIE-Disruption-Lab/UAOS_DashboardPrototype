@@ -1,0 +1,31 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Database (user-specific — each instance starts fresh)
+backend/*.db
+backend/app.db
+backend/uaos_dashboard.db
+
+# User project data (personal/sensitive)
+backend/user_data/
+
+# Gradle caches (per-machine)
+**/.gradle/
+**/build/
+**/.fuseki/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp

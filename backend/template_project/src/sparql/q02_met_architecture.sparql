@@ -1,0 +1,40 @@
+# ==============================================================================
+# Q2: Mission Engineering Thread Architecture Comparison
+#
+# Mission Engineering Question (MEG Q6):
+#   What are the alternative architectures for the SEAD MissionThread,
+#   and what capability configurations does each allocate? Which systems
+#   bear the required capabilities?
+#
+# Implements the MEG "alternative MET" pattern: multiple solution-specific
+#   implementations of the same solution-agnostic MissionThread enable
+#   side-by-side architectural trade-space analysis.
+#
+# Three METs implement mt_SEADSequence:
+#   Baseline   — 9 x AH-64A Apache + MH-53J Pave Low + E-3 AWACS
+#   Alternative — B-2 Spirit stealth bomber + E-3 AWACS
+#   Berserker  — 1 x MQ-99 autonomous UAS (standalone)
+# ==============================================================================
+
+PREFIX me:   <http://uaontologies.com/UAOS_Domain/UAOS_MissionEngineering#>
+PREFIX info: <http://uaontologies.com/UAOS_Core/UAOS_Information#>
+PREFIX tlo:  <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?metLabel ?threadLabel ?capConfigLabel ?capabilityLabel ?bearerName
+WHERE {
+  ?met       a                           me:MissionEngineeringThread ;
+             me:implementsMissionThread  ?thread ;
+             me:allocatesCapability      ?capConfig .
+  ?capConfig info:describes              ?capability .
+  ?capability tlo:sdo                   ?bearer .
+
+  OPTIONAL { ?met        rdfs:label  ?metLabel        }
+  OPTIONAL { ?thread     rdfs:label  ?threadLabel     }
+  OPTIONAL { ?capConfig  rdfs:label  ?capConfigLabel  }
+  OPTIONAL { ?capability rdfs:label  ?capabilityLabel }
+  OPTIONAL { ?bearer     tlo:hasName ?bHasName        }
+  OPTIONAL { ?bearer     rdfs:label  ?bRdfsLabel      }
+  BIND(COALESCE(?bHasName, ?bRdfsLabel) AS ?bearerName)
+}
+ORDER BY ?metLabel ?capabilityLabel

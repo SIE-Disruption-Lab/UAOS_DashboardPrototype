@@ -1,0 +1,30 @@
+# ==============================================================================
+# Q1: Kill Chain Coverage by Performer
+#
+# Mission Engineering Question (MEG Q17 / Q22):
+#   Which performers — Blue and Red — can execute which steps of the
+#   F2T2EA kill chain? Are there coverage gaps? Which single platform
+#   provides the broadest kill-chain reach?
+#
+# Key insight: The MQ-99 Berserker covers all six F2T2EA steps autonomously.
+#   The Baseline required three separate manned platforms (AH-64A, MH-53J,
+#   E-3 AWACS) to collectively achieve the same coverage.
+#
+# Prefixes:
+#   me   — UAOS_MissionEngineering vocabulary
+#   rdfs — standard RDFS labels
+# ==============================================================================
+
+PREFIX me:   <http://uaontologies.com/UAOS_Domain/UAOS_MissionEngineering#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?performerLabel ?activityLabel
+WHERE {
+  ?performer  a                      me:OperationalPerformer ;
+              me:isCapableToPerform  ?activity .
+  ?activity   a                      me:OperationalActivity .
+
+  OPTIONAL { ?performer rdfs:label ?performerLabel }
+  OPTIONAL { ?activity  rdfs:label ?activityLabel  }
+}
+ORDER BY ?performerLabel ?activityLabel

@@ -1,0 +1,32 @@
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs:  <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd:   <http://www.w3.org/2001/XMLSchema#>
+PREFIX tlo:   <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX bn:    <http://uaontologies.com/UAOS_Domain/UAOS_BayesianNetworks#>
+PREFIX oml:   <http://opencaesar.io/oml#>
+PREFIX event: <http://uaontologies.com/UAOS_Core/UAOS_Event#>
+
+# Returns all Bayesian Network nodes and edges in a single UNION result.
+# rowType = "node" rows carry:  id, name, visible, trueVal, falseVal, testDate (observable nodes only)
+# rowType = "edge" rows carry:  id, parent, child, weight
+
+SELECT ?rowType ?id ?name ?visible ?trueVal ?falseVal ?testDate ?parent ?child ?weight
+WHERE {
+  {
+    BIND("node" AS ?rowType)
+    ?id bn:hasBayesianNodeVisibility ?visible .
+    OPTIONAL { ?id tlo:hasName ?name }
+    OPTIONAL { ?id bn:hasBayesianTrueStateValue ?trueVal }
+    OPTIONAL { ?id bn:hasBayesianFalseStateValue ?falseVal }
+    OPTIONAL { ?id event:occursOn ?tr . ?tr tlo:hasBeginInstant ?testDate }
+  }
+  UNION
+  {
+    BIND("edge" AS ?rowType)
+    ?id a bn:HasBayesianChild ;
+        oml:hasSource ?parent ;
+        oml:hasTarget ?child ;
+        bn:hasBayesianWeight ?weight .
+  }
+}
+ORDER BY ?rowType ?id

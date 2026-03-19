@@ -1,0 +1,21 @@
+# Q2 — Dead Functions (No Mode Availability)
+# Finds Function instances that have no modes:availableIn assertion.
+# Such functions can never be executed regardless of system state.
+# Transitions are excluded because their availability is inferred by the
+# TransitionAvailability rule (sta:exits -> modes:availableIn) rather than asserted.
+# Expected result: fn-tpms (Monitor Tyre Pressure) has no mode assigned.
+
+PREFIX tlo:   <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX modes: <http://uaontologies.com/UAOS_Domain/UAOS_Modes#>
+PREFIX sta:   <http://uaontologies.com/UAOS_Domain/UAOS_States#>
+
+SELECT ?fnName ?systemName
+WHERE {
+  ?fn a tlo:Function ;
+      tlo:hasName ?fnName ;
+      tlo:sdo ?sys .
+  ?sys tlo:hasName ?systemName .
+  FILTER NOT EXISTS { ?fn modes:availableIn ?mode }
+  FILTER NOT EXISTS { ?fn a sta:Transition }
+}
+ORDER BY ?systemName ?fnName

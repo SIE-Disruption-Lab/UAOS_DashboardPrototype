@@ -1,0 +1,20 @@
+# Q3 — Requirements Without Verification Coverage
+# Finds all Requirement instances that have no verification activity (Test, Inspection,
+# Demonstration, or Analysis) pointing to them via ver:verifies.
+# Expected result: REQ-F-001, REQ-F-002, REQ-F-003, REQ-F-006, REQ-F-007, REQ-F-008
+# have no assigned verification activity.
+
+PREFIX req:  <http://uaontologies.com/UAOS_Domain/UAOS_Requirements#>
+PREFIX ver:  <http://uaontologies.com/UAOS_Domain/UAOS_Verification#>
+PREFIX tlo:  <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT DISTINCT ?id ?text
+WHERE {
+  ?r a ?type ;
+     tlo:hasID ?id ;
+     req:hasRequirementText ?text .
+  ?type rdfs:subClassOf* req:Requirement .
+  FILTER NOT EXISTS { ?activity ver:verifies ?r }
+}
+ORDER BY ?id

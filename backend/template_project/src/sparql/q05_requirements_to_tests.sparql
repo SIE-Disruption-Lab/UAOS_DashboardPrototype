@@ -1,0 +1,38 @@
+# ==============================================================================
+# Q5: Requirements Allocation and Test Verification Traceability
+#
+# Mission Engineering Question (MEG Q11 / Q3):
+#   Which subsystems are allocated which requirements?
+#   Which developmental test events verify those requirements?
+#   Are there requirements with no test coverage (verification gaps)?
+#
+# Uses LEFT OPTIONAL join on ver:verifies so requirements with no
+#   assigned test still appear in the results with null test values —
+#   making coverage gaps explicit.
+#
+# Expected gap: req_C1_33_1 (ELINT power-on) and req_C1_33_3 (EO/IR
+#   coordination) have no verifying DT events in the current test plan.
+# ==============================================================================
+
+PREFIX tlo:  <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX req:  <http://uaontologies.com/UAOS_Domain/UAOS_Requirements#>
+PREFIX ver:  <http://uaontologies.com/UAOS_Domain/UAOS_Verification#>
+PREFIX sa:   <http://uaontologies.com/UAOS_Domain/UAOS_SystemArchitecture#>
+PREFIX test: <http://uaontologies.com/UAOS_Domain/UAOS_Test#>
+
+SELECT ?subsystemName ?reqID ?reqText ?testID ?testName
+WHERE {
+  ?subsystem   a                        sa:System ;
+               tlo:hasName              ?subsystemName ;
+               req:allocatesRequirement ?requirement .
+
+  ?requirement tlo:hasID                ?reqID ;
+               req:hasRequirementText   ?reqText .
+
+  OPTIONAL {
+    ?test ver:verifies ?requirement .
+    OPTIONAL { ?test tlo:hasID   ?testID   }
+    OPTIONAL { ?test tlo:hasName ?testName }
+  }
+}
+ORDER BY ?subsystemName ?reqID
