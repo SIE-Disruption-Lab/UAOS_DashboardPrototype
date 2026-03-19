@@ -725,6 +725,7 @@ const Dashboard = {
     const beliefs = this._computeBNBeliefs(nodes, edges, initStates);
 
     // Build Cytoscape elements
+    const nodeIds = new Set(nodes.map(n => n.id));
     const cyNodes = nodes.map(n => ({
       data: {
         id:          n.id,
@@ -733,9 +734,12 @@ const Dashboard = {
         visible:     n.visible,
       },
     }));
-    const cyEdges = edges.map((e, i) => ({
-      data: { id: `e${i}`, source: e.parent, target: e.child, weight: `w=${e.weight.toFixed(2)}` },
-    }));
+    // Filter out edges whose endpoints have no corresponding BN node (prevents Cytoscape crash)
+    const cyEdges = edges
+      .filter(e => nodeIds.has(e.parent) && nodeIds.has(e.child))
+      .map((e, i) => ({
+        data: { id: `e${i}`, source: e.parent, target: e.child, weight: `w=${e.weight.toFixed(2)}` },
+      }));
 
     const uid = 'bn-' + Math.random().toString(36).slice(2);
     container.innerHTML = `
