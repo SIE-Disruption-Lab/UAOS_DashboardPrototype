@@ -23,6 +23,8 @@ const TABS = [
   { id: 'moe_calculations',         label: 'MOE Calculations',            description: 'MOE values calculated as the product of input parameter measurements, with historical timeline.' },
   // Risk Matrices
   { id: 'risk_matrix',              label: 'Risk Matrices',               description: 'DoD 5×5 risk matrices — system performance risks (DT) and operational risks (OT). Likelihood from Bayesian network posteriors.' },
+  // Test Strategy
+  { id: 'test_strategy',            label: 'Test Strategy',               description: 'OFT schedule Gantt view — planned execution windows, required actors and infrastructure, and resource conflict detection.' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -466,6 +468,12 @@ const Dashboard = {
     // Risk Matrices has its own renderer
     if (tab.id === 'risk_matrix') {
       this._renderRiskMatrix(container, data);
+      return;
+    }
+
+    // Test Strategy has its own renderer
+    if (tab.id === 'test_strategy') {
+      this._renderTestStrategy(container, data);
       return;
     }
 
@@ -1502,6 +1510,304 @@ const Dashboard = {
   },
 
   // ── End Risk Matrices ─────────────────────────────────────────────────────
+
+  // ── Test Strategy ──────────────────────────────────────────────────────────
+
+  _renderTestStrategy(container, data) {
+    if (!data.bindings || data.bindings.length === 0) {
+      container.innerHTML = '<div class="tab-empty"><i class="bi bi-inbox"></i> No test strategy data found. This tab requires BerserkerVerification OML to be compiled and loaded.</div>';
+      return;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function parseDT(s) {
+      if (!s) return null;
+      const clean = s.split('^')[0];
+      return new Date(clean.endsWith('Z') ? clean : clean + 'Z');
+    }
+    function fmtUTC(d) {
+      if (!d) return '—';
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${String(d.getUTCHours()).padStart(2,'0')}:00`;
+    }
+    function shortLabel(name) {
+      return name
+        .replace(/ Operational (Test Procedure|Flight Test.*|Test.*)$/i, '')
+        .replace(/ Test Procedure$/i, '')
+        .replace(/ Procedure$/i, '')
+        .replace(/ Op Test$/i, '')
+        .trim();
+    }
+
+    // ── Parse rows ────────────────────────────────────────────────────────────
+    const tests = [];
+    for (const row of data.bindings) {
+      const start = parseDT(row.start?.value);
+      const end   = parseDT(row.end?.value);
+      if (!start || !end || isNaN(start) || isNaN(end)) continue;
+      tests.push({
+        procID:      row.procID?.value      || '',
+        procName:    row.procName?.value    || '',
+        procDesc:    row.procDesc?.value    || '',
+        phase:       row.phase?.value       || '',
+        missionType: row.missionType?.value || '',
+        cameoId:     row.cameoId?.value     || '',
+        testID:      row.testID?.value      || '',
+        testStatus:  row.testStatus?.value  || '',
+        start, end,
+        actors: (row.actors?.value || '').split('|').filter(Boolean),
+        infra:  (row.infra?.value  || '').split('|').filter(Boolean),
+      });
+    }
+    tests.sort((a, b) => a.start - b.start || a.procID.localeCompare(b.procID));
+
+    if (tests.length === 0) {
+      container.innerHTML = '<div class="tab-empty"><i class="bi bi-inbox"></i> No parseable test data.</div>';
+      return;
+    }
+
+    // ── Conflict detection ────────────────────────────────────────────────────
+    const conflicts = [];
+    for (let i = 0; i < tests.length; i++) {
+      for (let j = i + 1; j < tests.length; j++) {
+        const a = tests[i], b = tests[j];
+        if (a.start < b.end && b.start < a.end) {          // time windows overlap
+          const sharedActors = a.actors.filter(x => b.actors.includes(x));
+          const sharedInfra  = a.infra .filter(x => b.infra .includes(x));
+          for (const r of sharedActors) {
+            conflicts.push({ type: 'actor', resource: r, procA: a, procB: b });
+          }
+          for (const r of sharedInfra) {
+            conflicts.push({ type: 'infra', resource: r, procA: a, procB: b });
+          }
+        }
+      }
+    }
+    const conflictedIDs = new Set(conflicts.flatMap(c => [c.procA.procID, c.procB.procID]));
+
+    // ── Colour palette ────────────────────────────────────────────────────────
+    const PHASE_STYLE = {
+      Preflight:  { bg: 'rgba(13,110,253,0.75)',  border: 'rgba(13,110,253,1)',  badge: 'primary' },
+      Execution:  { bg: 'rgba(255,140,0,0.75)',   border: 'rgba(220,110,0,1)',   badge: 'warning'  },
+      Postflight: { bg: 'rgba(25,135,84,0.75)',   border: 'rgba(25,135,84,1)',   badge: 'success'  },
+    };
+    const CONFLICT_BG     = 'rgba(220,53,69,0.75)';
+    const CONFLICT_BORDER = 'rgba(180,30,50,1)';
+
+    // ── Gantt chart id ────────────────────────────────────────────────────────
+    const chartId = `gantt-ts-${Date.now()}`;
+
+    // ── Legend ────────────────────────────────────────────────────────────────
+    const legendHtml = `
+      <div class="d-flex flex-wrap align-items-center gap-3 mb-3 small">
+        ${Object.entries(PHASE_STYLE).map(([phase, s]) =>
+          `<span>
+            <span style="display:inline-block;width:14px;height:14px;border-radius:3px;
+                         background:${s.bg};vertical-align:middle;" class="me-1"></span>${phase}
+          </span>`
+        ).join('')}
+        <span>
+          <span style="display:inline-block;width:14px;height:14px;border-radius:3px;
+                       background:${CONFLICT_BG};vertical-align:middle;" class="me-1"></span>
+          Resource Conflict
+        </span>
+        <span class="text-muted ms-auto">Hover bars for details</span>
+      </div>`;
+
+    // ── Conflict panel ────────────────────────────────────────────────────────
+    let conflictHtml;
+    if (conflicts.length > 0) {
+      const items = conflicts.map(c => {
+        const icon  = c.type === 'actor' ? 'bi-person-fill-exclamation' : 'bi-tools';
+        const label = c.type === 'actor' ? 'Actor Conflict' : 'Equipment Conflict';
+        const window = `${fmtUTC(c.procA.start)} – ${fmtUTC(c.procA.end)} UTC`;
+        return `
+          <div class="alert alert-danger py-2 px-3 mb-2 d-flex align-items-start gap-2">
+            <i class="bi ${icon} fs-5 mt-1 flex-shrink-0"></i>
+            <div>
+              <div class="fw-semibold">${label}: <em>${c.resource}</em></div>
+              <div class="small mt-1">
+                <code>${c.procA.procID}</code> <span class="text-muted">(${shortLabel(c.procA.procName)})</span>
+                and
+                <code>${c.procB.procID}</code> <span class="text-muted">(${shortLabel(c.procB.procName)})</span>
+                are both scheduled for <strong>${window}</strong>.
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+      conflictHtml = `
+        <div class="mb-4">
+          <h6 class="text-danger mb-2">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+            ${conflicts.length} Resource Conflict${conflicts.length > 1 ? 's' : ''} Detected — Action Required
+          </h6>
+          ${items}
+        </div>`;
+    } else {
+      conflictHtml = `
+        <div class="alert alert-success small py-2 mb-4">
+          <i class="bi bi-check-circle-fill me-1"></i>No resource conflicts detected in the current schedule.
+        </div>`;
+    }
+
+    // ── OTP detail cards ──────────────────────────────────────────────────────
+    const cardsHtml = tests.map(t => {
+      const ps         = PHASE_STYLE[t.phase] || { badge: 'secondary' };
+      const isConflict = conflictedIDs.has(t.procID);
+      const actorBadges = t.actors.map(a =>
+        `<span class="badge bg-secondary me-1 mb-1">${a}</span>`
+      ).join('');
+      const infraBadges = t.infra.map(i =>
+        `<span class="badge bg-info text-dark me-1 mb-1">${i}</span>`
+      ).join('');
+      const cameoRow = t.cameoId
+        ? `<div class="small text-muted mt-2"><i class="bi bi-link-45deg me-1"></i>Cameo: <code style="font-size:10px;">${t.cameoId}</code></div>`
+        : '';
+      const conflictBanner = isConflict
+        ? `<div class="alert alert-danger py-1 px-2 small mb-2">
+             <i class="bi bi-exclamation-triangle-fill me-1"></i>Resource conflict — see above.
+           </div>`
+        : '';
+      return `
+        <div class="col-md-6 col-xl-4">
+          <div class="card h-100${isConflict ? ' border-danger border-2' : ''}">
+            <div class="card-header d-flex justify-content-between align-items-start py-2 px-3">
+              <div>
+                <span class="badge bg-${ps.badge} me-1">${t.phase || '—'}</span>
+                <code class="small">${t.procID}</code>
+              </div>
+              <span class="badge bg-light text-dark small">${t.missionType || '—'}</span>
+            </div>
+            <div class="card-body py-2 px-3">
+              ${conflictBanner}
+              <div class="fw-semibold mb-1" style="font-size:13px;">${t.procName}</div>
+              <div class="text-muted small mb-2">
+                <i class="bi bi-clock me-1"></i>${fmtUTC(t.start)} → ${fmtUTC(t.end)} UTC
+              </div>
+              <div class="mb-2">
+                <div class="small text-muted mb-1"><i class="bi bi-person me-1"></i><strong>Actors</strong></div>
+                ${actorBadges || '<span class="text-muted small">None assigned</span>'}
+              </div>
+              <div class="mb-1">
+                <div class="small text-muted mb-1"><i class="bi bi-tools me-1"></i><strong>Infrastructure</strong></div>
+                ${infraBadges || '<span class="text-muted small">None assigned</span>'}
+              </div>
+              ${cameoRow}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    // ── Assemble container HTML ───────────────────────────────────────────────
+    const chartHeight = Math.max(340, tests.length * 40 + 80);
+    container.innerHTML = `
+      ${legendHtml}
+      <div class="mb-4" style="position:relative;height:${chartHeight}px;">
+        <canvas id="${chartId}"></canvas>
+      </div>
+      ${conflictHtml}
+      <h6 class="mb-3">OTP Details</h6>
+      <div class="row g-3">${cardsHtml}</div>`;
+
+    // ── Chart.js Gantt ────────────────────────────────────────────────────────
+    const minMs = Math.min(...tests.map(t => t.start.getTime())) - 2 * 3600_000;
+    const maxMs = Math.max(...tests.map(t => t.end.getTime()))   + 2 * 3600_000;
+
+    const bgColors     = tests.map(t => conflictedIDs.has(t.procID) ? CONFLICT_BG     : (PHASE_STYLE[t.phase]?.bg     || 'rgba(108,117,125,0.75)'));
+    const borderColors = tests.map(t => conflictedIDs.has(t.procID) ? CONFLICT_BORDER : (PHASE_STYLE[t.phase]?.border || 'rgba(108,117,125,1)'));
+
+    const ctx = document.getElementById(chartId);
+    if (!ctx) return;
+
+    // Destroy any previous chart registered under this key
+    const chartKey = 'test_strategy-gantt';
+    if (this.charts[chartKey]) {
+      this.charts[chartKey].destroy();
+      delete this.charts[chartKey];
+    }
+
+    this.charts[chartKey] = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: tests.map(t => shortLabel(t.procName)),
+        datasets: [{
+          data:            tests.map(t => [t.start.getTime(), t.end.getTime()]),
+          backgroundColor: bgColors,
+          borderColor:     borderColors,
+          borderWidth:     2,
+          borderSkipped:   false,
+          borderRadius:    3,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: (items) => tests[items[0].dataIndex].procName,
+              label: (item) => {
+                const t = tests[item.dataIndex];
+                const lines = [
+                  `  ${fmtUTC(t.start)} → ${fmtUTC(t.end)} UTC`,
+                  `  Phase: ${t.phase || '—'} | Mission: ${t.missionType || '—'}`,
+                  `  Status: ${t.testStatus || '—'}`,
+                  `  Actors: ${t.actors.join(', ') || '—'}`,
+                  `  Infrastructure: ${t.infra.join(', ') || '—'}`,
+                ];
+                if (t.cameoId) lines.push(`  Cameo ID: ${t.cameoId}`);
+                if (conflictedIDs.has(t.procID)) {
+                  lines.push('');
+                  lines.push('  ⚠ Resource conflict — see details below chart');
+                }
+                return lines;
+              },
+            },
+            displayColors: false,
+          },
+        },
+        scales: {
+          x: {
+            type: 'linear',
+            min: minMs,
+            max: maxMs,
+            ticks: {
+              callback(val) {
+                const d   = new Date(val);
+                const hrs = d.getUTCHours();
+                const day = d.getUTCDate();
+                const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()];
+                // Show date label at midnight, hour label otherwise
+                if (hrs === 0) return `${day} ${mon}`;
+                return `${String(hrs).padStart(2,'0')}:00`;
+              },
+              maxTicksLimit: 16,
+              color: '#555',
+              font: { size: 11 },
+            },
+            grid: { color: 'rgba(0,0,0,0.06)' },
+            title: {
+              display: true,
+              text: 'UTC Date / Time (May 2026)',
+              color: '#666',
+              font: { size: 11 },
+            },
+          },
+          y: {
+            ticks: {
+              font: { size: 11 },
+              color: '#333',
+            },
+            grid: { display: false },
+          },
+        },
+      },
+    });
+  },
+
+  // ── End Test Strategy ──────────────────────────────────────────────────────
 
   async showLog() {
     const data = await apiFetch(`/projects/${App.currentProjectId}/build/log`).catch(() => ({ log: 'Could not retrieve log.' }));

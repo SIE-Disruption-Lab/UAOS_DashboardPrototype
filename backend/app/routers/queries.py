@@ -108,6 +108,13 @@ TABS = [
         "description": "MOE values calculated as the product of input parameter measurements, with historical timeline.",
         "query_file":  "moe_calculation",
     },
+    # ── Test Strategy (BerserkerVerification) ────────────────────────────────
+    {
+        "id":          "test_strategy",
+        "label":       "Test Strategy",
+        "description": "OFT schedule Gantt view — planned execution windows, required actors and infrastructure, and resource conflict detection.",
+        "query_file":  "test_strategy",
+    },
     # ── Risk Matrices ─────────────────────────────────────────────────────────
     {
         "id":          "risk_matrix",

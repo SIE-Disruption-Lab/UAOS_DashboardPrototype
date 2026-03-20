@@ -1,0 +1,71 @@
+# ==============================================================================
+# Test Strategy — OTP Schedule, Resources & Conflict Detection
+#
+# Returns one row per nested Operational Test Procedure (OTP) that sits
+# directly under the top-level programme procedure (hasID "MQ99-OFT"),
+# including:
+#   - procedure ID, name, description, phase, mission type, Cameo ID
+#   - planned start/end timestamps (from the linked temporal region)
+#   - pipe-delimited list of required actor names
+#   - pipe-delimited list of required infrastructure item names
+#
+# Conflict detection is performed entirely in the frontend renderer:
+#   ACTOR CONFLICT     — two OTPs with overlapping windows share an actor role
+#   EQUIPMENT CONFLICT — two OTPs with overlapping windows share an infra item
+#
+# Dataset: DesertStorm (or whichever project contains BerserkerVerification)
+# ==============================================================================
+
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs:  <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd:   <http://www.w3.org/2001/XMLSchema#>
+PREFIX tlo:   <http://uaontologies.com/UAOS_TopLevel/UAOS_TopLevel#>
+PREFIX test:  <http://uaontologies.com/UAOS_Domain/UAOS_Test#>
+PREFIX info:  <http://uaontologies.com/UAOS_Core/UAOS_Information#>
+PREFIX event: <http://uaontologies.com/UAOS_Core/UAOS_Event#>
+PREFIX tmp:   <http://uaontologies.com/UAOS_Domain/UAOS_TEMP#>
+
+SELECT ?procID ?procName ?procDesc ?phase ?missionType ?cameoId
+       ?testID ?testStatus ?start ?end
+       (GROUP_CONCAT(DISTINCT ?actorName; SEPARATOR="|") AS ?actors)
+       (GROUP_CONCAT(DISTINCT ?infraName; SEPARATOR="|") AS ?infra)
+WHERE {
+  # Walk down from the programme-level procedure to each nested OTP
+  ?parentProc tlo:hasID "MQ99-OFT" ;
+              tlo:hasContinuantPart ?proc .
+
+  ?proc a test:TestProcedure ;
+        tlo:hasID   ?procID ;
+        tlo:hasName ?procName .
+
+  OPTIONAL { ?proc tlo:hasNaturalLanguageDescription ?procDesc      }
+  OPTIONAL { ?proc tmp:hasTestPhase                  ?phase         }
+  OPTIONAL { ?proc tmp:hasTestMissionType            ?missionType   }
+  OPTIONAL { ?proc tmp:cameoId                       ?cameoId       }
+
+  # The procedure prescribes exactly one companion Test instance
+  ?proc info:prescribes ?testInst .
+  ?testInst a test:Test ;
+            tlo:hasID          ?testID ;
+            test:hasTestStatus ?testStatus ;
+            event:occursOn     ?tr .
+
+  # Temporal execution window
+  ?tr tlo:hasBeginInstant ?start ;
+      tlo:hasEndInstant   ?end .
+
+  # Required actors (zero or more)
+  OPTIONAL {
+    ?proc tmp:hasTestActor ?actorRole .
+    ?actorRole tlo:hasName ?actorName .
+  }
+
+  # Required infrastructure (zero or more)
+  OPTIONAL {
+    ?proc tmp:hasTestInfrastructure ?infraRole .
+    ?infraRole tlo:hasName ?infraName .
+  }
+}
+GROUP BY ?procID ?procName ?procDesc ?phase ?missionType ?cameoId
+         ?testID ?testStatus ?start ?end
+ORDER BY ?start ?procID
